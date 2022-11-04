@@ -1,6 +1,5 @@
 package com.example.test
 
-import android.content.ContentResolver
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
@@ -29,6 +28,7 @@ import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
 
+
 class MainActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityMainBinding
@@ -37,11 +37,14 @@ class MainActivity : AppCompatActivity() {
         const val REQUEST_CODE_GOOGLE_SIGN_IN = 101
         const val REQUEST_CODE_SELECT_FILE = 111
         const val GOOGLE_DRIVE_FOLDER_ID = "drive_folder_id"
-        private val REQUEST_AUTHORIZATION = 123
+        const val REQUEST_AUTHORIZATION = 1001
     }
 
+    private val sharef by lazy {
+        getSharedPreferences("testDrive", MODE_PRIVATE)
+    }
     private val driveUtils by lazy {
-        DriveUtils(this, getSharedPreferences("testDrive", MODE_PRIVATE))
+        DriveUtils(this, sharef)
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -74,31 +77,29 @@ class MainActivity : AppCompatActivity() {
         CoroutineScope(Dispatchers.Default).launch {
             GoogleSignIn.getLastSignedInAccount(applicationContext)?.let { account ->
                 val credential = GoogleAccountCredential.usingOAuth2(
-                    applicationContext, listOf(DriveScopes.DRIVE_FILE)
+                    applicationContext, listOf(DriveScopes.DRIVE)
                 )
-                credential.selectedAccountName = account.account?.name
+                credential.selectedAccount = account.account
                 val driveService = Drive.Builder(NetHttpTransport(), GsonFactory.getDefaultInstance(), credential)
                     .setApplicationName("TestDrive")
                     .build()
-                val fileMeta = com.google.api.services.drive.model.File().apply {
-                    name = "screenShot"
-                    mimeType = "application/vnd.google-apps.file"
-                }
-                val filePath = File(fileSelected.toString())
-                val fileContent = FileContent("image/png", filePath)
+                val filePath = File(fileSelected?.path)
                 try {
-                    val file = driveService.files().create(fileMeta, fileContent)
-                        .setFields("id")
-                        .execute()
-                    Log.d("ddddd", "Sync: name = ${file?.name} id = ${file?.id}")
+                    val gfile = com.google.api.services.drive.model.File()
+                    gfile.name = filePath.name
+                    val fileContent = FileContent("image/png", filePath)
+                    val result = driveService.files().create(gfile, fileContent).execute()
+                    Log.d("ddddd", "upload success -  name:${result.name}, id: ${result.id}")
                 } catch (ex: UserRecoverableAuthIOException) {
                     Log.d("ddddd", "UserRecoverableAuthIOException: ${ex.printStackTrace()}")
-                    startActivityForResult(ex.intent, REQUEST_AUTHORIZATION);
-                } catch (e: Exception) {
-                    Log.d("ddddd", "Sync exception: ${e.printStackTrace()}")
+                    startActivityForResult(ex.intent, REQUEST_AUTHORIZATION)
+                } catch (ex: Exception) {
+                    ex.printStackTrace()
+                    Log.d("ddddd", "Sync exception: ${ex.printStackTrace()}")
                 }
             }
         }
+        Log.d("dddd", "uploadFile")
 //        driveUtils.uploadFileToGDrive2(File(fileSelected.toString()), "image/png", GOOGLE_DRIVE_FOLDER_ID)
     }
 
@@ -162,7 +163,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    var fileSelected: Uri? = null
+    private var fileSelected: Uri? = null
     private fun selectFile() {
         val intent = Intent()
             .setType("*/*")
@@ -173,14 +174,14 @@ class MainActivity : AppCompatActivity() {
     private fun makeCopy(fileUri: Uri) {
         val parcelFileDescriptor = contentResolver.openFileDescriptor(fileUri, "r", null)
         val inputStream = FileInputStream(parcelFileDescriptor?.fileDescriptor)
-        val file = File(filesDir, getFileName(contentResolver, fileUri))
+        val file = File(filesDir, getFileName(fileUri))
         val outputStream = FileOutputStream(file)
         IOUtils.copy(inputStream, outputStream)
     }
 
-    private fun getFileName(resolver: ContentResolver, uri: Uri): String {
+    private fun getFileName(uri: Uri): String {
         var name = ""
-        val returnCursor = resolver.query(uri, null, null, null, null)
+        val returnCursor = contentResolver.query(uri, null, null, null, null)
         returnCursor?.let {
             val nameIndex = it.getColumnIndex(OpenableColumns.DISPLAY_NAME)
             it.moveToFirst()

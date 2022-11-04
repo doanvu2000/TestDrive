@@ -1,13 +1,16 @@
 package com.example.test
 
 import android.content.Context
+import android.content.Intent
 import android.content.SharedPreferences
 import android.os.Environment
 import android.util.Log
-import androidx.core.app.ActivityCompat
+import androidx.core.app.ActivityCompat.startActivityForResult
 import androidx.core.content.edit
+import com.example.test.MainActivity.Companion.REQUEST_AUTHORIZATION
 import com.google.android.gms.auth.api.signin.GoogleSignIn
 import com.google.api.client.googleapis.extensions.android.gms.auth.GoogleAccountCredential
+import com.google.api.client.googleapis.extensions.android.gms.auth.UserRecoverableAuthIOException
 import com.google.api.client.http.FileContent
 import com.google.api.client.http.javanet.NetHttpTransport
 import com.google.api.client.json.gson.GsonFactory
@@ -32,10 +35,10 @@ class DriveUtils(val context: Context, val sharedPref: SharedPreferences) {
             val credential = GoogleAccountCredential.usingOAuth2(
                 context, listOf(DriveScopes.DRIVE_FILE)
             )
-            credential.selectedAccountName = googleAccount.account?.name
+            credential.selectedAccount = googleAccount.account
             return Drive.Builder(
                 NetHttpTransport(), GsonFactory.getDefaultInstance(), credential
-            ).setApplicationName("TestDriveApi")
+            ).setApplicationName("TestDrive")
                 .build()
         }
 
