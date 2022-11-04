@@ -96,8 +96,10 @@ class MainActivity : AppCompatActivity() {
                 showToast("upload db success")
                 binding.tvResult.text = "upload success"
             } catch (e: UserRecoverableAuthIOException) {
-                binding.tvResult.text = "upload failed: UserRecoverableAuthIOException"
-                startActivityForResult(e.intent, 1001)
+                withContext(Dispatchers.Main){
+                    binding.tvResult.text = "upload failed: UserRecoverableAuthIOException"
+                    startActivityForResult(e.intent, 1001)
+                }
             } catch (e: Exception) {
                 e.printStackTrace()
                 withContext(Dispatchers.Main) {

@@ -33,7 +33,7 @@ class DriveUtils(val context: Context, val sharedPref: SharedPreferences) {
     fun getDriveService(): Drive? {
         GoogleSignIn.getLastSignedInAccount(context)?.let { googleAccount ->
             val credential = GoogleAccountCredential.usingOAuth2(
-                context, listOf(DriveScopes.DRIVE)
+                context, listOf(DriveScopes.DRIVE_METADATA_READONLY)
             )
             credential.selectedAccount = googleAccount.account
             return Drive.Builder(
