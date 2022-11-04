@@ -20,13 +20,16 @@ import com.google.api.client.json.gson.GsonFactory
 import com.google.api.client.util.IOUtils
 import com.google.api.services.drive.Drive
 import com.google.api.services.drive.DriveScopes
+import com.google.api.services.drive.model.FileList
 import com.squareup.picasso.Picasso
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
+import java.io.OutputStream
 
 
 class MainActivity : AppCompatActivity() {
@@ -38,6 +41,7 @@ class MainActivity : AppCompatActivity() {
         const val REQUEST_CODE_SELECT_FILE = 111
         const val GOOGLE_DRIVE_FOLDER_ID = "drive_folder_id"
         const val REQUEST_AUTHORIZATION = 1001
+        const val TAG = "dddd"
     }
 
     private val sharef by lazy {
@@ -46,15 +50,117 @@ class MainActivity : AppCompatActivity() {
     private val driveUtils by lazy {
         DriveUtils(this, sharef)
     }
+    private lateinit var noteDatabase: NoteDatabase
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
+
         GoogleSignIn.getLastSignedInAccount(this)?.let {
             setUpView(it)
         }
+        noteDatabase = DatabaseBuilder.getInstance(this)
         initListener()
+    }
+
+    suspend fun uploadDb(onRequestAccessDrive: ((intent: Intent, requestCode: Int) -> Unit)? = null) {
+        driveUtils.getDriveService()?.let { driveService ->
+            val storageFile = com.google.api.services.drive.model.File()
+            storageFile.parents = listOf("appDataFolder")
+            storageFile.name = "note"
+
+            val storageFileShm = com.google.api.services.drive.model.File()
+            storageFileShm.parents = listOf("appDataFolder")
+            storageFileShm.name = "note-shm"
+
+            val storageFileWal = com.google.api.services.drive.model.File()
+            storageFileWal.parents = listOf("appDataFolder")
+            storageFileWal.name = "note-wal"
+
+            val filePath: File = File(noteDbPath)
+            val filePathShm: File = File(noteDbShmPath)
+            val filePathWal: File = File(noteDbWal)
+            val mediaContent = FileContent("", filePath)
+            val mediaContentShm = FileContent("", filePathShm)
+            val mediaContentWal = FileContent("", filePathWal)
+            try {
+                val file: com.google.api.services.drive.model.File = driveService.files().create(storageFile, mediaContent).execute()
+                System.out.printf("$TAG Filename: %s File ID: %s \n", file.name, file.id)
+                val fileShm: com.google.api.services.drive.model.File =
+                    driveService.files().create(storageFileShm, mediaContentShm).execute()
+                System.out.printf("$TAG Filename: %s File ID: %s \n", fileShm.name, fileShm.id)
+                val fileWal: com.google.api.services.drive.model.File =
+                    driveService.files().create(storageFileWal, mediaContentWal).execute()
+                System.out.printf("$TAG Filename: %s File ID: %s \n", fileWal.name, fileWal.id)
+                showToast("upload db success")
+                binding.tvResult.text = "upload success"
+            } catch (e: UserRecoverableAuthIOException) {
+                binding.tvResult.text = "upload failed: UserRecoverableAuthIOException"
+                startActivityForResult(e.intent, 1001)
+            } catch (e: Exception) {
+                e.printStackTrace()
+                withContext(Dispatchers.Main) {
+                    binding.tvResult.text = "upload failed: ${e.message}"
+                }
+
+            } finally {
+                withContext(Dispatchers.Main) {
+                    binding.progess.gone()
+                }
+            }
+        }
+    }
+
+    private suspend fun downloadDb() {
+        val driveService = driveUtils.getDriveService()
+        driveService?.let { googleDriveService ->
+            try {
+                val dir = File("/data/data/com.example.drivedbsync/databases")
+                if (dir.isDirectory) {
+                    val children = dir.list()
+                    for (i in children.indices) {
+                        File(dir, children[i]).delete()
+                    }
+                }
+                val files: FileList = googleDriveService.files().list()
+                    .setSpaces("appDataFolder")
+                    .setFields("nextPageToken, files(id, name, createdTime)")
+                    .setPageSize(10)
+                    .execute()
+                if (files.files.size == 0) Log.e("ddddd", "No DB file exists in Drive")
+                for (file in files.files) {
+                    System.out.printf(
+                        "$TAG Found file: %s (%s) %s\n",
+                        file.name, file.id, file.createdTime
+                    )
+                    if (file.name == "note") {
+                        val outputStream: OutputStream = FileOutputStream(noteDbPath)
+                        googleDriveService.files().get(file.id).executeMediaAndDownloadTo(outputStream)
+                        Log.d(TAG, "downloadDb: $outputStream")
+                    } else if (file.name == "note-shm") {
+                        val outputStream: OutputStream = FileOutputStream(noteDbShmPath)
+                        googleDriveService.files().get(file.id).executeMediaAndDownloadTo(outputStream)
+                    } else if (file.name == "note-wal") {
+                        val outputStream: OutputStream = FileOutputStream(noteDbWal)
+                        googleDriveService.files().get(file.id).executeMediaAndDownloadTo(outputStream)
+                    }
+                }
+                withContext(Dispatchers.Main) {
+                    showToast("download DB")
+                    binding.tvResult.text = "download success"
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    Log.d(TAG, "downloadDb exception: ${e.printStackTrace()}")
+                    binding.tvResult.text = "download failed ${e.message}"
+                }
+            } finally {
+                withContext(Dispatchers.Main) {
+                    binding.progess.gone()
+                }
+            }
+        }
     }
 
     private fun initListener() {
@@ -66,10 +172,23 @@ class MainActivity : AppCompatActivity() {
         }
         binding.btnSignOut.setOnClickListener {
             signOut()
+            binding.tvResult.text = ""
         }
         binding.btnSyn.setOnClickListener {
-            uploadFile()
-//            Log.d("ddddd", "Sync: name = ${fileUpload?.name} id = ${fileUpload?.id}")
+            CoroutineScope(Dispatchers.IO).launch {
+                withContext(Dispatchers.Main) {
+                    binding.progess.show()
+                }
+                uploadDb()
+            }
+        }
+        binding.btnRestore.setOnClickListener {
+            CoroutineScope(Dispatchers.IO).launch {
+                withContext(Dispatchers.Main) {
+                    binding.progess.show()
+                }
+                downloadDb()
+            }
         }
     }
 
@@ -87,20 +206,19 @@ class MainActivity : AppCompatActivity() {
                 try {
                     val gfile = com.google.api.services.drive.model.File()
                     gfile.name = filePath.name
-                    val fileContent = FileContent("image/png", filePath)
+                    val fileContent = FileContent(fileSelected?.let { getMimeType(it) }, filePath)
                     val result = driveService.files().create(gfile, fileContent).execute()
-                    Log.d("ddddd", "upload success -  name:${result.name}, id: ${result.id}")
+                    Log.d(TAG, "upload success -  name:${result.name}, id: ${result.id}")
                 } catch (ex: UserRecoverableAuthIOException) {
-                    Log.d("ddddd", "UserRecoverableAuthIOException: ${ex.printStackTrace()}")
+                    Log.d(TAG, "UserRecoverableAuthIOException: ${ex.printStackTrace()}")
                     startActivityForResult(ex.intent, REQUEST_AUTHORIZATION)
                 } catch (ex: Exception) {
                     ex.printStackTrace()
-                    Log.d("ddddd", "Sync exception: ${ex.printStackTrace()}")
+                    Log.d(TAG, "Sync exception: ${ex.printStackTrace()}")
                 }
             }
         }
-        Log.d("dddd", "uploadFile")
-//        driveUtils.uploadFileToGDrive2(File(fileSelected.toString()), "image/png", GOOGLE_DRIVE_FOLDER_ID)
+        Log.d(TAG, "uploadFile")
     }
 
     private fun signOut() {
@@ -141,19 +259,17 @@ class MainActivity : AppCompatActivity() {
                 val x = task.getResult(ApiException::class.java)
                 setUpView(x)
             } catch (e: Exception) {
-                Log.d("dddd", "exception: ${e.printStackTrace()} ")
+                Log.d(TAG, "exception: ${e.printStackTrace()} ")
             }
-        }
-        if (requestCode == 123) {
-            Log.d("dddd", "activityResult request authorization Drive")
         }
         if (resultCode == RESULT_OK) {
             when (requestCode) {
                 REQUEST_CODE_SELECT_FILE -> {
                     val selectedFile = data?.data
                     selectedFile?.let { makeCopy(it) }
-                    Log.d("dddd", "select file ${selectedFile.toString()} ")
+                    Log.d(TAG, "select file ${selectedFile.toString()} ")
                     fileSelected = selectedFile
+                    Log.d(TAG, "onActivityResult: ${fileSelected?.let { getMimeType(it) }}")
                     binding.imageSelected.apply {
                         setImageURI(null)
                         setImageURI(fileSelected)

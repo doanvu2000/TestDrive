@@ -5,6 +5,15 @@
     android:layout_height="match_parent"
     tools:context=".MainActivity">
 
+
+    <ProgressBar
+        android:id="@+id/progess"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_above="@id/btnSign"
+        android:layout_centerInParent="true"
+        android:visibility="gone" />
+
     <Button
         android:id="@+id/btnChoose"
         android:layout_width="wrap_content"
@@ -85,6 +94,16 @@
         android:layout_below="@id/btnSyn"
         android:layout_centerHorizontal="true"
         android:layout_marginTop="10dp"
-        android:scaleType="centerCrop" />
+        android:scaleType="centerCrop"
+        android:visibility="gone" />
+
+    <TextView
+        android:id="@+id/tvResult"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_below="@id/btnSyn"
+        android:layout_centerInParent="true"
+        android:layout_marginTop="10dp"
+        android:textSize="20sp" />
 
 </RelativeLayout>
