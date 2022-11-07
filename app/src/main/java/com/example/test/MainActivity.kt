@@ -24,10 +24,7 @@ import com.google.firebase.storage.FirebaseStorage
 import com.google.firebase.storage.StorageReference
 import com.google.gson.Gson
 import com.squareup.picasso.Picasso
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
+import kotlinx.coroutines.*
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
@@ -199,7 +196,7 @@ class MainActivity : AppCompatActivity() {
         }
         binding.btnDeleteDb.setOnClickListener {
             CoroutineScope(Dispatchers.IO).launch {
-                for (i in 1..20) {
+                for (i in 1..500) {
                     noteDatabase.noteDao().delete(
                         Note(i, "content$i", "title$i")
                     )
@@ -209,7 +206,7 @@ class MainActivity : AppCompatActivity() {
         }
         binding.btnInsert.setOnClickListener {
             CoroutineScope(Dispatchers.IO).launch {
-                for (i in 1..20) {
+                for (i in 1..500) {
                     noteDatabase.noteDao().insert(
                         Note(i, "content$i", "title$i")
                     )
@@ -249,7 +246,7 @@ class MainActivity : AppCompatActivity() {
             override fun onDataChange(snapshot: DataSnapshot) {
                 val result = snapshot.children.find { it.key == idAccount }?.value
                 val storageRef = FirebaseStorage.getInstance().reference
-                storageRef.child("database/${idAccount}${prefix}").getFile(localFile)
+                storageRef.child("database/${idAccount}").getFile(localFile)
                     .addOnSuccessListener {
                         if (isDownload) {
                             Log.d(TAG, "download DB success: $prefix")
@@ -281,7 +278,7 @@ class MainActivity : AppCompatActivity() {
             noteDatabase = DatabaseBuilder.reloadDatabase(applicationContext)
             list?.forEach { noteDatabase.noteDao().insert(it) }
             showDatabase()
-            withContext(Dispatchers.Main){
+            withContext(Dispatchers.Main) {
                 binding.progess.gone()
             }
         }
@@ -292,11 +289,34 @@ class MainActivity : AppCompatActivity() {
         isDownload = false
         val storageRef = FirebaseStorage.getInstance().reference
         val fileDb = Uri.fromFile(File(noteDbPath))
-        val fileDbRef = storageRef.child("database/${idAccount}db")
+        val fileDbRef = storageRef.child("database/${idAccount}")
         uploadFile(fileDbRef, fileDb)
     }
 
     private fun uploadFile(fileDbRef: StorageReference, fileDb: Uri) {
+//        CoroutineScope(Dispatchers.IO).launch {
+//            kotlin.runCatching {
+//                val file = async { createFileTxt() }
+//                file.await().let { f ->
+//                    fileDbRef.putStream(FileInputStream(f))
+//                        .addOnSuccessListener {
+//                            Log.d(TAG, "uploadFile: $${fileDbRef.name}")
+////                showToast("upload success ${fileDbRef.name}")
+//                            fileDbRef.downloadUrl.addOnSuccessListener { uri ->
+//                                Log.d(TAG, "uploadDbWithFirebase: $uri")
+//                                saveToFireBase(uri)
+////                            binding.progess.hide()
+//                            }.addOnFailureListener {
+////                            binding.progess.hide()
+//                            }
+//                        }.addOnFailureListener {
+////                        showToast("Failed to upload")
+////                        binding.progess.hide()
+//                            Log.d(TAG, "uploadDbWithFirebase: ${it.message}")
+//                        }
+//                }
+//            }
+//        }
         fileDbRef.putFile(fileDb)
             .addOnSuccessListener {
                 Log.d(TAG, "uploadFile: $${fileDbRef.name}")
@@ -304,15 +324,32 @@ class MainActivity : AppCompatActivity() {
                 fileDbRef.downloadUrl.addOnSuccessListener { uri ->
                     Log.d(TAG, "uploadDbWithFirebase: $uri")
                     saveToFireBase(uri)
-                    binding.progess.hide()
+//                            binding.progess.hide()
                 }.addOnFailureListener {
-                    binding.progess.hide()
+//                            binding.progess.hide()
                 }
             }.addOnFailureListener {
-                showToast("Failed to upload")
-                binding.progess.hide()
+//                        showToast("Failed to upload")
+//                        binding.progess.hide()
                 Log.d(TAG, "uploadDbWithFirebase: ${it.message}")
             }
+    }
+
+    private suspend fun createFileTxt(): File {
+        convertDatabaseToJson()
+        Log.d(TAG, "uploadFile: $json")
+        val path = filesDir
+        val letDirectory = File(path, "LET")
+        letDirectory.mkdirs()
+        val file = File(letDirectory, "Records.txt")
+
+        withContext(Dispatchers.IO) {
+            FileOutputStream(file).use { output ->
+                output.write(json.toByteArray())
+            }
+            return@withContext file
+        }
+        return file
     }
 
     private fun saveToFireBase(uri: Uri?) {
@@ -320,14 +357,32 @@ class MainActivity : AppCompatActivity() {
         database.setValue(uri.toString())
     }
 
+    var json: String = ""
+    private suspend fun convertDatabaseToJson() {
+        CoroutineScope(Dispatchers.IO).launch {
+            val list = noteDatabase.noteDao().getAll()
+            json = Gson().toJson(list)
+        }
+    }
+
     private suspend fun showDatabase() {
         val list = noteDatabase.noteDao().getAll()
         Log.d(TAG, "showDatabase: ${list?.size}")
         withContext(Dispatchers.Main) {
-            binding.tvResult.text = list.toString()
+            if (list != null) {
+                if (list.isNotEmpty()){
+                    binding.tvResult.text = list.last().toString()
+                }else {
+                    binding.tvResult.text =  "empty"
+                }
+            }else {
+                binding.tvResult.text =  "null"
+            }
         }
-        val json = Gson().toJson(list)
-        Log.d(TAG, "showDatabase: $json")
+    }
+
+    private fun jsonFileName(): String {
+        return getString(R.string.app_name) + ".json"
     }
 
     private fun signOut() {
