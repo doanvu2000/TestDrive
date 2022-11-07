@@ -12,16 +12,17 @@ import com.google.android.gms.auth.api.signin.GoogleSignIn
 import com.google.android.gms.auth.api.signin.GoogleSignInAccount
 import com.google.android.gms.auth.api.signin.GoogleSignInOptions
 import com.google.android.gms.common.api.ApiException
-import com.google.api.client.googleapis.extensions.android.gms.auth.GoogleAccountCredential
 import com.google.api.client.googleapis.extensions.android.gms.auth.UserRecoverableAuthIOException
 import com.google.api.client.http.FileContent
-import com.google.api.client.http.javanet.NetHttpTransport
-import com.google.api.client.json.gson.GsonFactory
-import com.google.api.client.util.Data
 import com.google.api.client.util.IOUtils
-import com.google.api.services.drive.Drive
-import com.google.api.services.drive.DriveScopes
 import com.google.api.services.drive.model.FileList
+import com.google.firebase.database.DataSnapshot
+import com.google.firebase.database.DatabaseError
+import com.google.firebase.database.FirebaseDatabase
+import com.google.firebase.database.ValueEventListener
+import com.google.firebase.storage.FirebaseStorage
+import com.google.firebase.storage.StorageReference
+import com.google.gson.Gson
 import com.squareup.picasso.Picasso
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -45,6 +46,7 @@ class MainActivity : AppCompatActivity() {
         const val TAG = "dddd"
     }
 
+    private var idAccount = ""
     private val sharef by lazy {
         getSharedPreferences("testDrive", MODE_PRIVATE)
     }
@@ -177,14 +179,6 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-
-    private fun backUpDatabase() {
-        val dbFile = File(getDatabasePath(noteDbPath).path)
-        val dbShmFile = File(getDatabasePath(noteDbShmPath).path)
-        val dbWalFile = File(getDatabasePath(noteDbWal).path)
-
-    }
-
     private fun initListener() {
         binding.btnSign.setOnClickListener {
             signIn()
@@ -198,34 +192,29 @@ class MainActivity : AppCompatActivity() {
             binding.tvResult.text = ""
         }
         binding.btnSyn.setOnClickListener {
-            CoroutineScope(Dispatchers.IO).launch {
-                withContext(Dispatchers.Main) {
-                    binding.progess.show()
-                }
-                uploadDb()
-            }
+            uploadDbWithFirebase()
         }
         binding.btnRestore.setOnClickListener {
-            CoroutineScope(Dispatchers.IO).launch {
-                withContext(Dispatchers.Main) {
-                    binding.progess.show()
-                }
-                downloadDb()
-            }
+            downloadDbFromFirebase()
         }
-        val note1 = Note(1, "content1", "title1")
-        val note2 = Note(2, "content2", "title2")
         binding.btnDeleteDb.setOnClickListener {
             CoroutineScope(Dispatchers.IO).launch {
-                noteDatabase.noteDao().delete(note1)
-                noteDatabase.noteDao().delete(note2)
+                for (i in 1..20) {
+                    noteDatabase.noteDao().delete(
+                        Note(i, "content$i", "title$i")
+                    )
+                }
                 showDatabase()
             }
         }
         binding.btnInsert.setOnClickListener {
             CoroutineScope(Dispatchers.IO).launch {
-                noteDatabase.noteDao().insert(note1)
-                noteDatabase.noteDao().insert(note2)
+                for (i in 1..20) {
+                    noteDatabase.noteDao().insert(
+                        Note(i, "content$i", "title$i")
+                    )
+                }
+//                noteDatabase.noteDao().insert(note2)
                 showDatabase()
             }
         }
@@ -236,40 +225,109 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private suspend fun showDatabase() {
-        val list = noteDatabase.noteDao().getAll()
-        withContext(Dispatchers.Main) {
-            binding.tvResult.text = list.toString()
+    private fun downloadDbFromFirebase() {
+        isDownload = true
+        val rootPath = "/data/data/com.example.test/databases"
+//        val dir = File(rootPath)
+//        if (dir.isDirectory) {
+//            val children = dir.list()
+//            for (i in children) {
+//                if (i.equals("note.db")) {
+//                    File(dir, i).delete()
+//                }
+//            }
+//        }
+        val localFile = File(rootPath, "note2.db")
+        downloadFile(localFile, "db")
+    }
+
+    private fun downloadFile(localFile: File, prefix: String) {
+        localFile.createNewFile()
+        val database = FirebaseDatabase.getInstance()
+        val myRef = database.getReference("DataNote")
+        myRef.addValueEventListener(object : ValueEventListener {
+            override fun onDataChange(snapshot: DataSnapshot) {
+                val result = snapshot.children.find { it.key == idAccount }?.value
+                val storageRef = FirebaseStorage.getInstance().reference
+                storageRef.child("database/${idAccount}${prefix}").getFile(localFile)
+                    .addOnSuccessListener {
+                        if (isDownload) {
+                            Log.d(TAG, "download DB success: $prefix")
+                            binding.tvResult.text = "download success"
+                            loadDatabase()
+                            binding.progess.hide()
+                        }
+                    }
+                    .addOnFailureListener {
+                        showToast("download DB failed")
+                        Log.d(TAG, "onFailedDownload: ${it.message}")
+                        binding.progess.hide()
+                    }
+            }
+
+            override fun onCancelled(error: DatabaseError) {
+
+            }
+        })
+    }
+
+    private fun loadDatabase() {
+        binding.progess.show()
+        DatabaseBuilder.resetDatabase()
+        noteDatabase = DatabaseBuilder.getInstance2(this)
+        CoroutineScope(Dispatchers.IO).launch {
+            val list = noteDatabase.noteDao().getAll()
+            Log.d(TAG, "loadDatabase: ${list?.size}")
+            noteDatabase = DatabaseBuilder.reloadDatabase(applicationContext)
+            list?.forEach { noteDatabase.noteDao().insert(it) }
+            showDatabase()
+            withContext(Dispatchers.Main){
+                binding.progess.gone()
+            }
         }
     }
 
-    private fun uploadFile() {
-        CoroutineScope(Dispatchers.Default).launch {
-            GoogleSignIn.getLastSignedInAccount(applicationContext)?.let { account ->
-                val credential = GoogleAccountCredential.usingOAuth2(
-                    applicationContext, listOf(DriveScopes.DRIVE)
-                )
-                credential.selectedAccount = account.account
-                val driveService = Drive.Builder(NetHttpTransport(), GsonFactory.getDefaultInstance(), credential)
-                    .setApplicationName("TestDrive")
-                    .build()
-                val filePath = File(fileSelected?.path)
-                try {
-                    val gfile = com.google.api.services.drive.model.File()
-                    gfile.name = filePath.name
-                    val fileContent = FileContent(fileSelected?.let { getMimeType(it) }, filePath)
-                    val result = driveService.files().create(gfile, fileContent).execute()
-                    Log.d(TAG, "upload success -  name:${result.name}, id: ${result.id}")
-                } catch (ex: UserRecoverableAuthIOException) {
-                    Log.d(TAG, "UserRecoverableAuthIOException: ${ex.printStackTrace()}")
-                    startActivityForResult(ex.intent, REQUEST_AUTHORIZATION)
-                } catch (ex: Exception) {
-                    ex.printStackTrace()
-                    Log.d(TAG, "Sync exception: ${ex.printStackTrace()}")
+    var isDownload = false
+    private fun uploadDbWithFirebase() {
+        isDownload = false
+        val storageRef = FirebaseStorage.getInstance().reference
+        val fileDb = Uri.fromFile(File(noteDbPath))
+        val fileDbRef = storageRef.child("database/${idAccount}db")
+        uploadFile(fileDbRef, fileDb)
+    }
+
+    private fun uploadFile(fileDbRef: StorageReference, fileDb: Uri) {
+        fileDbRef.putFile(fileDb)
+            .addOnSuccessListener {
+                Log.d(TAG, "uploadFile: $${fileDbRef.name}")
+//                showToast("upload success ${fileDbRef.name}")
+                fileDbRef.downloadUrl.addOnSuccessListener { uri ->
+                    Log.d(TAG, "uploadDbWithFirebase: $uri")
+                    saveToFireBase(uri)
+                    binding.progess.hide()
+                }.addOnFailureListener {
+                    binding.progess.hide()
                 }
+            }.addOnFailureListener {
+                showToast("Failed to upload")
+                binding.progess.hide()
+                Log.d(TAG, "uploadDbWithFirebase: ${it.message}")
             }
+    }
+
+    private fun saveToFireBase(uri: Uri?) {
+        val database = FirebaseDatabase.getInstance().getReference("DataNote").child(idAccount)
+        database.setValue(uri.toString())
+    }
+
+    private suspend fun showDatabase() {
+        val list = noteDatabase.noteDao().getAll()
+        Log.d(TAG, "showDatabase: ${list?.size}")
+        withContext(Dispatchers.Main) {
+            binding.tvResult.text = list.toString()
         }
-        Log.d(TAG, "uploadFile")
+        val json = Gson().toJson(list)
+        Log.d(TAG, "showDatabase: $json")
     }
 
     private fun signOut() {
@@ -296,10 +354,23 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setUpView(x: GoogleSignInAccount) {
+        idAccount = x.id.toString()
         Picasso.get().load(x.photoUrl).into(binding.imageAvatar)
         binding.imageAvatar.visibility = View.VISIBLE
         binding.tvEmail.text = x.email
         binding.tvName.text = x.displayName
+        val database = FirebaseDatabase.getInstance()
+        val myRef = database.getReference("DataNote")
+        myRef.addValueEventListener(object : ValueEventListener {
+            override fun onDataChange(snapshot: DataSnapshot) {
+                val result = snapshot.children.find { it.key == idAccount }?.value
+                Log.d(TAG, "data: $result")
+            }
+
+            override fun onCancelled(error: DatabaseError) {
+
+            }
+        })
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
@@ -319,13 +390,13 @@ class MainActivity : AppCompatActivity() {
                     val selectedFile = data?.data
                     selectedFile?.let {
                         val tempFile = makeCopy(it)
-                        CoroutineScope(Dispatchers.IO).launch {
-                            getMimeType(it)?.let { it1 ->
-                                driveUtils.uploadFileToGDrive(file = tempFile, it1) { intentRs, requestCode ->
-                                    startActivityForResult(intentRs, requestCode)
-                                }
-                            }
-                        }
+//                        CoroutineScope(Dispatchers.IO).launch {
+//                            getMimeType(it)?.let { it1 ->
+//                                driveUtils.uploadFileToGDrive(file = tempFile, it1) { intentRs, requestCode ->
+//                                    startActivityForResult(intentRs, requestCode)
+//                                }
+//                            }
+//                        }
                     }
                     Log.d(TAG, "select file ${selectedFile.toString()} ")
                     fileSelected = selectedFile

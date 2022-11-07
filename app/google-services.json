@@ -1,0 +1,40 @@
+{
+  "project_info": {
+    "project_number": "476343012199",
+    "firebase_url": "https://testdrive-367602-default-rtdb.asia-southeast1.firebasedatabase.app",
+    "project_id": "testdrive-367602",
+    "storage_bucket": "testdrive-367602.appspot.com"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:476343012199:android:d3163321468f6fe2813dc2",
+        "android_client_info": {
+          "package_name": "com.example.test"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "476343012199-oc3c1d93bjnff2ek6gt1qh17ra8fim3d.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBVfB-PPp6VimDk8TFGvKT8Pef6QXEjpZw"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "476343012199-oc3c1d93bjnff2ek6gt1qh17ra8fim3d.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

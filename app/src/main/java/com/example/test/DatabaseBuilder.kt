@@ -14,6 +14,16 @@ object DatabaseBuilder {
         return INSTANCE!!
     }
 
+    fun getInstance2(context: Context): NoteDatabase {
+        if (INSTANCE == null) {
+            synchronized(NoteDatabase::class) {
+                INSTANCE = buildRoomDB2(context)
+            }
+        }
+        return INSTANCE!!
+    }
+
+
     private fun buildRoomDB(context: Context) =
         Room.databaseBuilder(
             context.applicationContext,
@@ -21,8 +31,18 @@ object DatabaseBuilder {
             DB_NAME
         ).build()
 
+    private fun buildRoomDB2(context: Context) =
+        Room.databaseBuilder(
+            context.applicationContext,
+            NoteDatabase::class.java,
+            DB_NAME_2
+        ).build()
+
     fun reloadDatabase(context: Context): NoteDatabase {
         INSTANCE = null
         return getInstance(context)
+    }
+    fun resetDatabase(){
+        INSTANCE = null
     }
 }
